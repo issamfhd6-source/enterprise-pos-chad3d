@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide Column;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart' hide Table;
 import 'package:path/path.dart' as p;
@@ -21,6 +21,7 @@ class ExchangeRateController extends ChangeNotifier {
   bool get canEditRate => _role == UserRole.manager;
 
   void setRole(UserRole r) {
+    if (_role == r) return;
     _role = r;
     notifyListeners();
   }
@@ -31,7 +32,7 @@ class ExchangeRateController extends ChangeNotifier {
   }
 
   bool updateRate(double val) {
-    if (!canEditRate || val <= 0) return false;
+    if (!canEditRate || val.isNaN || val.isInfinite || val <= 0) return false;
     _usdToNewSyp = val;
     notifyListeners();
     return true;
@@ -56,6 +57,7 @@ class Invoices extends Table {
 @DriftDatabase(tables: [Products, Invoices])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
+
   @override
   int get schemaVersion => 1;
 
@@ -71,6 +73,7 @@ class AppDatabase extends _$AppDatabase {
 class Card3D extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTap;
+
   const Card3D({super.key, required this.child, this.onTap});
 
   @override
@@ -99,49 +102,56 @@ class Card3D extends StatelessWidget {
 class RateBanner extends StatelessWidget {
   final ExchangeRateController ctrl;
   final VoidCallback onChanged;
+
   const RateBanner({super.key, required this.ctrl, required this.onChanged});
+
+  Future<void> _editRateDialog(BuildContext context) async {
+    final c = TextEditingController(text: ctrl.usdToNewSyp.toString());
+    final res = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('سعر الصرف (المدير فقط)'),
+        content: TextField(
+          controller: c,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'سعر 1 دولار بالليرة الجديدة',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                Navigator.pop(ctx, double.tryParse(c.text.trim())),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    c.dispose();
+
+    if (res != null && ctrl.updateRate(res)) {
+      onChanged();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final rate = ctrl.usdToNewSyp;
     final oldRate = rate * ctrl.oldToNewSypRatio;
     return Card3D(
-      onTap: ctrl.canEditRate
-          ? () async {
-              final c = TextEditingController(text: rate.toString());
-              final res = await showDialog<double>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('سعر الصرف (المدير فقط)'),
-                  content: TextField(
-                    controller: c,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('إلغاء'),
-                    ),
-                    ElevatedButton(
-                      onPressed: () =>
-                          Navigator.pop(ctx, double.tryParse(c.text.trim())),
-                      child: const Text('حفظ'),
-                    ),
-                  ],
-                ),
-              );
-              if (res != null && ctrl.updateRate(res)) {
-                onChanged();
-              }
-            }
-          : null,
+      onTap: ctrl.canEditRate ? () => _editRateDialog(context) : null,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            '1\$ = ${rate.toStringAsFixed(2)} جديدة | ${oldRate.toStringAsFixed(0)} قديمة',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+          Expanded(
+            child: Text(
+              '1\$ = ${rate.toStringAsFixed(2)} جديدة | ${oldRate.toStringAsFixed(0)} قديمة',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
           Text(ctrl.canEditRate ? 'تعديل' : 'عرض فقط'),
         ],
@@ -153,6 +163,7 @@ class RateBanner extends StatelessWidget {
 class HomeScreen extends StatefulWidget {
   final AppDatabase db;
   final ExchangeRateController ctrl;
+
   const HomeScreen({super.key, required this.db, required this.ctrl});
 
   @override
@@ -175,10 +186,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final name = _prodName.text.trim();
     final price = double.tryParse(_prodPrice.text.trim()) ?? 0;
     if (name.isEmpty || price <= 0) return;
+
     await widget.db.into(widget.db.products).insert(
-          ProductsCompanion.insert(name: name, saleUsd: Value(price)),
+          ProductsCompanion.insert(
+            name: name,
+            saleUsd: Value(price),
+          ),
         );
     _prodName.clear();
+    if (!mounted) return;
     setState(() => _status = 'تمت إضافة مادة: $name');
   }
 
@@ -189,6 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
             totalUsd: const Value(25.0),
           ),
         );
+    if (!mounted) return;
     setState(() => _status = 'تم إنشاء فاتورة بقيمة \$25.00');
   }
 
@@ -199,13 +216,27 @@ class _HomeScreenState extends State<HomeScreen> {
     await widget.db
         .update(widget.db.invoices)
         .write(const InvoicesCompanion(isSynced: Value(true)));
+    if (!mounted) return;
     setState(() => _status = 'تمت مزامنة السجلات المحلية');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Enterprise POS Chad 3D')),
+      appBar: AppBar(
+        title: const Text('Enterprise POS Chad 3D'),
+        actions: [
+          IconButton(
+            icon: Icon(
+              widget.ctrl.isDark ? Icons.light_mode : Icons.dark_mode,
+            ),
+            onPressed: () {
+              widget.ctrl.toggleDark();
+              setState(() {});
+            },
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(14),
         children: [
@@ -218,11 +249,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   value: widget.ctrl.role,
                   items: const [
                     DropdownMenuItem(
-                        value: UserRole.manager, child: Text('المدير')),
+                      value: UserRole.manager,
+                      child: Text('المدير'),
+                    ),
                     DropdownMenuItem(
-                        value: UserRole.branchManager, child: Text('مدير فرع')),
+                      value: UserRole.branchManager,
+                      child: Text('مدير فرع'),
+                    ),
                     DropdownMenuItem(
-                        value: UserRole.cashier, child: Text('محاسب')),
+                      value: UserRole.cashier,
+                      child: Text('محاسب'),
+                    ),
                   ],
                   onChanged: (r) {
                     if (r != null) {
@@ -273,6 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: _syncAll,
                   child: const Text('مزامنة السجلات'),
                 ),
+                const SizedBox(height: 4),
                 Text(_status),
               ],
             ),
@@ -312,6 +350,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final db = AppDatabase();
+  final ctrl = ExchangeRateController();
+  runApp(EnterprisePosApp(db: db, ctrl: ctrl));
+}
+
+class EnterprisePosApp extends StatelessWidget {
+  final AppDatabase db;
+  final ExchangeRateController ctrl;
+
+  const EnterprisePosApp({super.key, required this.db, required this.ctrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: ctrl,
+      builder: (context, _) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            brightness: ctrl.isDark ? Brightness.dark : Brightness.light,
+            useMaterial3: true,
+          ),
+          builder: (context, child) => Directionality(
+            textDirection: TextDirection.rtl,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: HomeScreen(db: db, ctrl: ctrl),
+        );
+      },
+    );
+  }
+}
+Binding.ensureInitialized();
   final db = AppDatabase();
   final ctrl = ExchangeRateController();
   runApp(EnterprisePosApp(db: db, ctrl: ctrl));
