@@ -4,12 +4,6 @@ import 'dart:math' as math;
 import 'package:drift/drift.dart' hide Column;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/servicesimport 'dart:convert';
-import 'dart:io';
-import 'dart:math' as math;
-import 'package:drift/drift.dart' hide Column;
-import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -18,10 +12,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 part 'main.g.dart';
-
-// ============================================================================
-// 1. 3D THEME & INTERACTIVE CARDS
-// ============================================================================
 
 class App3DTheme {
   static const Color darkBg = Color(0xFF0A121E);
@@ -146,11 +136,6 @@ class _Interactive3DCardState extends State<Interactive3DCard> {
                   offset: Offset(0, _pressed ? 3 : 8),
                   blurRadius: _pressed ? 8 : 16,
                 ),
-                BoxShadow(
-                  color: App3DTheme.accentCyan.withValues(alpha: 0.06),
-                  offset: const Offset(0, -2),
-                  blurRadius: 6,
-                ),
               ],
             ),
             child: widget.child,
@@ -161,25 +146,7 @@ class _Interactive3DCardState extends State<Interactive3DCard> {
   }
 }
 
-// ============================================================================
-// 2. EXCHANGE RATE CONTROLLER & ROLE PERMISSIONS GUARD
-// ============================================================================
-
-enum UserRole {
-  manager,
-  branchManager,
-  cashier,
-}
-
-enum SystemPermission {
-  editExchangeRate,
-  manageBranchesAndStaff,
-  manageInventory,
-  createInvoices,
-  manageCashboxAndExpenses,
-  viewReportsAndExportPdf,
-  manageBackupAndSync,
-}
+enum UserRole { manager, branchManager, cashier }
 
 class ExchangeRateController extends ChangeNotifier {
   double _usdToNewSyp;
@@ -201,19 +168,7 @@ class ExchangeRateController extends ChangeNotifier {
   double get oldToNewSypRatio => _oldToNewSypRatio;
   UserRole get currentRole => _currentRole;
   bool get isDarkMode => _isDarkMode;
-
   bool get canEditExchangeRate => _currentRole == UserRole.manager;
-
-  double usdToNewSypValue(double usd) => usd * _usdToNewSyp;
-  double usdToOldSypValue(double usd) => usd * _usdToNewSyp * _oldToNewSypRatio;
-
-  double newSypToUsdValue(double newSyp) =>
-      _usdToNewSyp <= 0 ? 0 : newSyp / _usdToNewSyp;
-
-  double oldSypToUsdValue(double oldSyp) {
-    final denom = _usdToNewSyp * _oldToNewSypRatio;
-    return denom <= 0 ? 0 : oldSyp / denom;
-  }
 
   void toggleTheme() {
     _isDarkMode = !_isDarkMode;
@@ -233,46 +188,12 @@ class ExchangeRateController extends ChangeNotifier {
     notifyListeners();
     return true;
   }
-
-  void updateOldToNewRatio(double ratio) {
-    if (!canEditExchangeRate) return;
-    if (ratio <= 0 || ratio.isNaN || ratio.isInfinite) return;
-    _oldToNewSypRatio = ratio;
-    notifyListeners();
-  }
 }
-
-class RolePermissionsGuard {
-  final ExchangeRateController rateController;
-
-  RolePermissionsGuard({required this.rateController});
-
-  bool hasPermission(SystemPermission permission) {
-    switch (rateController.currentRole) {
-      case UserRole.manager:
-        return true;
-      case UserRole.branchManager:
-        return permission == SystemPermission.manageInventory ||
-            permission == SystemPermission.createInvoices ||
-            permission == SystemPermission.viewReportsAndExportPdf;
-      case UserRole.cashier:
-        return permission == SystemPermission.createInvoices;
-    }
-  }
-
-  bool get canOnlyManagerEditExchangeRate =>
-      rateController.currentRole == UserRole.manager;
-}
-
-// ============================================================================
-// 3. DRIFT LOCAL DATABASE SCHEMA
-// ============================================================================
 
 class Branches extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get name => text().withLength(min: 1, max: 120)();
-  TextColumn get locationType =>
-      text().withDefault(const Constant('branch'))();
+  TextColumn get locationType => text().withDefault(const Constant('branch'))();
   TextColumn get address => text().nullable()();
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
   BoolColumn get isSynced => boolean().withDefault(const Constant(false))();
@@ -300,6 +221,346 @@ class Products extends Table {
   IntColumn get minStockAlert => integer().withDefault(const Constant(5))();
   RealColumn get costUsd => real().withDefault(const Constant(0.0))();
   RealColumn get saleUsd => real().withDefault(const Constant(0.0))();
+  RealColumn get costNewSyp => real().withDefault(const Constant(0.0))();
+  RealColumn get saleNewSyp => real().withDefault(const Constant(0.0))();
+  RealColumn get costOldSyp => real().withDefault(const Constant(0.0))();
+  RealColumn get saleOldSyp => real().withDefault(const Constant(0.0))();
+  RealColumn get profitMarginPercent => real().withDefault(const Constant(20.0))();
+  DateTimeColumn get expiryDate => dateTime().nullable()();
+  TextColumn get notes => text().nullable()();
+  BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
+  BoolColumn get isSynced => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDate)();
+}
+
+class Accounts extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text().withLength(min: 1, max: 150)();
+  TextColumn get accountType => text()();
+  TextColumn get phone => text().nullable()();
+  RealColumn get balanceUsd => real().withDefault(const Constant(0.0))();
+  TextColumn get notes => text().nullable()();
+  BoolColumn get isSynced => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDate)();
+}
+
+class Invoices extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get invoiceNumber => text()();
+  TextColumn get invoiceType => text()();
+  IntColumn get branchId => integer().withDefault(const Constant(1))();
+  IntColumn get accountId => integer().nullable()();
+  IntColumn get productId => integer().nullable()();
+  IntColumn get quantity => integer().withDefault(const Constant(0))();
+  RealColumn get subtotalUsd => real().withDefault(const Constant(0.0))();
+  RealColumn get discountUsd => real().withDefault(const Constant(0.0))();
+  RealColumn get totalUsd => real().withDefault(const Constant(0.0))();
+  RealColumn get paidUsd => real().withDefault(const Constant(0.0))();
+  RealColumn get remainingUsd => real().withDefault(const Constant(0.0))();
+  RealColumn get exchangeRateUsed => real().withDefault(const Constant(135.0))();
+  TextColumn get notes => text().nullable()();
+  BoolColumn get isSynced => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDate)();
+}
+
+class CashboxTransactions extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get entryType => text()();
+  TextColumn get category => text().withDefault(const Constant('عام'))();
+  IntColumn get accountId => integer().nullable()();
+  RealColumn get amountUsd => real().withDefault(const Constant(0.0))();
+  RealColumn get amountNewSyp => real().withDefault(const Constant(0.0))();
+  RealColumn get amountOldSyp => real().withDefault(const Constant(0.0))();
+  TextColumn get notes => text().nullable()();
+  BoolColumn get isSynced => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDate)();
+}
+
+class SystemSettings extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get storeName =>
+      text().withDefault(const Constant('نظام المحاسبة ونقاط البيع 3D'))();
+  RealColumn get usdToNewSypRate => real().withDefault(const Constant(135.0))();
+  RealColumn get oldToNewSypRatio => real().withDefault(const Constant(100.0))();
+  BoolColumn get autoAdjustCashboxOnPurchase =>
+      boolean().withDefault(const Constant(true))();
+  BoolColumn get autoAdjustCashboxOnSale =>
+      boolean().withDefault(const Constant(true))();
+  BoolColumn get autoAdjustCashboxOnExpense =>
+      boolean().withDefault(const Constant(true))();
+  DateTimeColumn get serverSyncCursor => dateTime().withDefault(currentDate)();
+}
+
+@DriftDatabase(tables: [
+  Branches,
+  SystemUsers,
+  Products,
+  Accounts,
+  Invoices,
+  CashboxTransactions,
+  SystemSettings,
+])
+class AppDatabase extends _$AppDatabase {
+  AppDatabase() : super(_openConnection());
+
+  @override
+  int get schemaVersion => 1;
+
+  static QueryExecutor _openConnection() {
+    return LazyDatabase(() async {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File(p.join(dir.path, 'enterprise_pos_chad3d.sqlite'));
+      return NativeDatabase.createInBackground(file);
+    });
+  }
+
+  Future<SystemSetting> ensureInitialSeedData() async {
+    final existingSettings = await select(systemSettings).get();
+    SystemSetting activeSetting;
+    if (existingSettings.isEmpty) {
+      final id = await into(systemSettings).insert(
+        SystemSettingsCompanion.insert(
+          storeName: const Value('نظام المحاسبة ونقاط البيع 3D'),
+          usdToNewSypRate: const Value(135.0),
+          oldToNewSypRatio: const Value(100.0),
+        ),
+      );
+      activeSetting =
+          (await (select(systemSettings)..where((t) => t.id.equals(id))).get())
+              .first;
+    } else {
+      activeSetting = existingSettings.first;
+    }
+
+    final existingBranches = await select(branches).get();
+    if (existingBranches.isEmpty) {
+      await into(branches).insert(
+        BranchesCompanion.insert(
+          name: const Value('الفرع الرئيسي'),
+          locationType: const Value('branch'),
+          address: const Value('المركز'),
+          isSynced: const Value(true),
+        ),
+      );
+    }
+
+    final existingUsers = await select(systemUsers).get();
+    if (existingUsers.isEmpty) {
+      await into(systemUsers).insert(
+        SystemUsersCompanion.insert(
+          fullName: const Value('المدير العام'),
+          phone: const Value('+963900000001'),
+          role: const Value('manager'),
+          branchId: const Value(1),
+          isSynced: const Value(true),
+        ),
+      );
+    }
+
+    return activeSetting;
+  }
+}
+
+class PricingSyncService {
+  final AppDatabase db;
+  final ExchangeRateController rateController;
+
+  PricingSyncService({required this.db, required this.rateController});
+
+  Future<bool> updateExchangeRateAndRepriceAllProducts(double newUsdRate) async {
+    if (!rateController.canEditExchangeRate) return false;
+    final accepted = rateController.updateUsdRate(newUsdRate);
+    if (!accepted) return false;
+
+    final ratio = rateController.oldToNewSypRatio;
+
+    await db.transaction(() async {
+      await db.update(db.systemSettings).write(
+            SystemSettingsCompanion(
+              usdToNewSypRate: Value(newUsdRate),
+              oldToNewSypRatio: Value(ratio),
+            ),
+          );
+
+      final allProducts = await db.select(db.products).get();
+      for (final prod in allProducts) {
+        final costNew = prod.costUsd * newUsdRate;
+        final saleNew = prod.saleUsd * newUsdRate;
+        final costOld = costNew * ratio;
+        final saleOld = saleNew * ratio;
+
+        await (db.update(db.products)..where((t) => t.id.equals(prod.id)))
+            .write(
+          ProductsCompanion(
+            costNewSyp: Value(costNew),
+            saleNewSyp: Value(saleNew),
+            costOldSyp: Value(costOld),
+            saleOldSyp: Value(saleOld),
+            isSynced: const Value(false),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+      }
+    });
+
+    return true;
+  }
+}
+
+class InvoiceService {
+  final AppDatabase db;
+  final ExchangeRateController rateController;
+
+  InvoiceService({required this.db, required this.rateController});
+
+  Future<int> createInvoice({
+    required String invoiceType,
+    required int branchId,
+    int? accountId,
+    int? productId,
+    int quantity = 0,
+    required double subtotalUsd,
+    required double discountUsd,
+    required double paidUsd,
+    String? notes,
+  }) async {
+    final netTotal = (subtotalUsd - discountUsd).clamp(0.0, double.infinity);
+    final remaining = (netTotal - paidUsd).clamp(0.0, double.infinity);
+    final rate = rateController.usdToNewSyp;
+    final ratio = rateController.oldToNewSypRatio;
+    final invNumber = 'INV-${DateTime.now().millisecondsSinceEpoch}';
+
+    return db.transaction(() async {
+      final settingsList = await db.select(db.systemSettings).get();
+      final settings = settingsList.isNotEmpty ? settingsList.first : null;
+
+      final id = await db.into(db.invoices).insert(
+            InvoicesCompanion.insert(
+              invoiceNumber: invNumber,
+              invoiceType: invoiceType,
+              branchId: Value(branchId),
+              accountId: Value(accountId),
+              productId: Value(productId),
+              quantity: Value(quantity),
+              subtotalUsd: Value(subtotalUsd),
+              discountUsd: Value(discountUsd),
+              totalUsd: Value(netTotal),
+              paidUsd: Value(paidUsd),
+              remainingUsd: Value(remaining),
+              exchangeRateUsed: Value(rate),
+              notes: Value(notes),
+              isSynced: const Value(false),
+            ),
+          );
+
+      if (productId != null && quantity > 0) {
+        final prodList = await (db.select(db.products)
+              ..where((t) => t.id.equals(productId)))
+            .get();
+        if (prodList.isNotEmpty) {
+          final prod = prodList.first;
+          final delta =
+              (invoiceType == 'sale' || invoiceType == 'purchaseReturn')
+                  ? -quantity
+                  : quantity;
+          final nextQty = (prod.totalQuantity + delta).clamp(0, 1 << 30);
+          await (db.update(db.products)..where((t) => t.id.equals(prod.id)))
+              .write(
+            ProductsCompanion(
+              totalQuantity: Value(nextQty),
+              isSynced: const Value(false),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
+        }
+      }
+
+      if (accountId != null && remaining > 0) {
+        final accList = await (db.select(db.accounts)
+              ..where((t) => t.id.equals(accountId)))
+            .get();
+        if (accList.isNotEmpty) {
+          final acc = accList.first;
+          final deltaBalance =
+              (invoiceType == 'sale' || invoiceType == 'purchaseReturn')
+                  ? remaining
+                  : -remaining;
+          await (db.update(db.accounts)..where((t) => t.id.equals(acc.id)))
+              .write(
+            AccountsCompanion(
+              balanceUsd: Value(acc.balanceUsd + deltaBalance),
+              isSynced: const Value(false),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
+        }
+      }
+
+      final allowCashbox = switch (invoiceType) {
+        'sale' || 'saleReturn' => settings?.autoAdjustCashboxOnSale ?? true,
+        'purchase' || 'purchaseReturn' =>
+          settings?.autoAdjustCashboxOnPurchase ?? true,
+        _ => true,
+      };
+
+      if (allowCashbox && paidUsd > 0) {
+        final entryType =
+            (invoiceType == 'sale' || invoiceType == 'purchaseReturn')
+                ? 'deposit'
+                : 'withdraw';
+        await db.into(db.cashboxTransactions).insert(
+              CashboxTransactionsCompanion.insert(
+                entryType: entryType,
+                category: Value('فاتورة $invNumber'),
+                accountId: Value(accountId),
+                amountUsd: Value(paidUsd),
+                amountNewSyp: Value(paidUsd * rate),
+                amountOldSyp: Value(paidUsd * rate * ratio),
+                notes: Value(notes ?? invoiceType),
+                isSynced: const Value(false),
+              ),
+            );
+      }
+
+      return id;
+    });
+  }
+}
+
+class CashboxService {
+  final AppDatabase db;
+  final ExchangeRateController rateController;
+
+  CashboxService({required this.db, required this.rateController});
+
+  Future<void> recordCashEntry({
+    required String entryType,
+    required String category,
+    int? accountId,
+    required double amountUsd,
+    String? notes,
+  }) async {
+    final rate = rateController.usdToNewSyp;
+    final ratio = rateController.oldToNewSypRatio;
+
+    await db.transaction(() async {
+      await db.into(db.cashboxTransactions).insert(
+            CashboxTransactionsCompanion.insert(
+              entryType: entryType,
+              category: Value(category),
+              accountId: Value(accountId),
+              amountUsd: Value(amountUsd),
+              amountNewSyp: Value(amountUsd * rate),
+              amountOldSyp: Value(amountUsd * rate * ratio),
+              notes: Value(notes),
+              isSynced: const Value(false),
+            ),
+          );
+
+      if (accountId != null &&
+          (entryType == 'customer_payment' || entryType == 'supplier_payment')) {
+        final accRows = await (db.select(db.accounts)
+              ..where((t) => t.id.equal
   RealColumn get costNewSyp => real().withDefault(const Constant(0.0))();
   RealColumn get saleNewSyp => real().withDefault(const Constant(0.0))();
   RealColumn get costOldSyp => real().withDefault(const Constant(0.0))();
